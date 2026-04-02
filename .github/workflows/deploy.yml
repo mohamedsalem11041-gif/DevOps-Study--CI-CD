@@ -57,23 +57,22 @@ jobs:
             --query "taskDefinition" > task-definition.json
 
       # 7️⃣ Update Task Definition Image & Clean JSON
-      - name: Update Task Definition Image & Clean JSON
+      - name: Update Task Definition
         run: |
-          # استبدال صورة الكونتينر
-          jq --arg IMAGE "${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY:${{ github.sha }}" \
-            '.containerDefinitions[0].image = $IMAGE' task-definition.json > tmp-task-def.json
+          IMAGE_URI=${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY:${{ github.sha }}
 
-          # احتفظ فقط بالحقول الأساسية
-          jq '{
-            family: .family,
-            executionRoleArn: .executionRoleArn,
-            networkMode: .networkMode,
-            containerDefinitions: .containerDefinitions,
-            volumes: .volumes,
-            requiresCompatibilities: .requiresCompatibilities,
-            cpu: .cpu,
-            memory: .memory
-          }' tmp-task-def.json > new-task-def.json
+          jq --arg IMAGE "$IMAGE_URI" '
+            .containerDefinitions[0].image = $IMAGE
+            | del(
+                .taskDefinitionArn,
+                .revision,
+                .status,
+                .requiresAttributes,
+                .compatibilities,
+                .registeredAt,
+                .registeredBy
+              )
+          ' task-definition.json > new-task-def.json
           
       - name: Register Task Definition
         id: register-task
