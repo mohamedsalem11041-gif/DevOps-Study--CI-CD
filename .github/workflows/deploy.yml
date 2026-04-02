@@ -3,7 +3,7 @@ name: Deploy React to ECS
 on: 
   push:
     branches: 
-      - master
+      - master  # أو main لو انت شغال على main
 
 jobs:
   build-and-deploy: 
@@ -11,8 +11,8 @@ jobs:
 
     env:
       ECR_REPOSITORY: react-test
-      ECS_CLUSTER: your-ecs-cluster
-      ECS_SERVICE: react-test-service
+      ECS_CLUSTER: react-cluster
+      ECS_SERVICE: react-service
       TASK_DEFINITION: react-task
       CONTAINER_NAME: react-container
       AWS_REGION: us-east-1
@@ -30,7 +30,7 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # 3️⃣ Login to ECR
+      # 3️⃣ Login to Amazon ECR
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
@@ -41,55 +41,44 @@ jobs:
           docker build -t $ECR_REPOSITORY .
           docker tag $ECR_REPOSITORY:latest ${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY:latest
 
-
-      # 6️⃣ Push Docker image to ECR
+      # 5️⃣ Push Docker image to ECR
       - name: Push Docker image
         run: |
           docker push ${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY:latest
 
-      # 7️⃣ Download existing ECS Task Definition
+      # 6️⃣ Download existing ECS Task Definition
       - name: Download Task Definition
         run: |
           aws ecs describe-task-definition \
             --task-definition $TASK_DEFINITION \
             --query "taskDefinition" > task-definition.json
 
-        # 8️⃣ Update Task Definition image & clean JSON
-      - name: Update Task Definition Image
+      # 7️⃣ Update Task Definition Image & Clean JSON
+      - name: Update Task Definition Image & Clean JSON
         run: |
-          # استبدل صورة الكونتينر
+          # استبدال صورة الكونتينر
           jq --arg IMAGE "${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY:latest" \
             '.containerDefinitions[0].image = $IMAGE' task-definition.json > tmp-task-def.json
 
-          # نظف الحقول الغير مسموح بها
+          # احتفظ فقط بالحقول الأساسية
           jq '{
             family: .family,
-            taskRoleArn: .taskRoleArn,
             executionRoleArn: .executionRoleArn,
             networkMode: .networkMode,
             containerDefinitions: .containerDefinitions,
             volumes: .volumes,
-            placementConstraints: .placementConstraints,
             requiresCompatibilities: .requiresCompatibilities,
             cpu: .cpu,
-            memory: .memory,
-            tags: .tags,
-            pidMode: .pidMode,
-            ipcMode: .ipcMode,
-            proxyConfiguration: .proxyConfiguration,
-            inferenceAccelerators: .inferenceAccelerators,
-            ephemeralStorage: .ephemeralStorage,
-            runtimePlatform: .runtimePlatform,
-            enableFaultInjection: .enableFaultInjection
+            memory: .memory
           }' tmp-task-def.json > new-task-def.json
 
-      # 9️⃣ Register new Task Definition
+      # 8️⃣ Register New Task Definition
       - name: Register New Task Definition
         run: |
           aws ecs register-task-definition \
             --cli-input-json file://new-task-def.json
 
-      # 🔟 Update ECS Service
+      # 9️⃣ Update ECS Service
       - name: Update ECS Service
         run: |
           aws ecs update-service \
