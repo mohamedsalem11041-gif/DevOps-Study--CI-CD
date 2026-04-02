@@ -1,0 +1,80 @@
+name: Deploy React to ECS
+
+on: 
+  push:
+    branches: 
+      - master
+
+jobs:
+  build-and-deploy: 
+    runs-on: ubuntu-latest
+
+    env:
+      ECR_REPOSITORY: react-test
+      ECS_CLUSTER: your-ecs-cluster
+      ECS_SERVICE: react-test-service
+      TASK_DEFINITION: react-task
+      CONTAINER_NAME: react-container
+      AWS_REGION: us-east-1
+
+    steps: 
+      # 1️⃣ Checkout repository
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2️⃣ Configure AWS credentials
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AKIAS66UDDYJGVKKGE6Z }}
+          aws-secret-access-key: ${{ secrets.f0ABQvry3cNotNHsahbFO38dtZJnYQisF97P6yVV }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # 3️⃣ Login to ECR
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # 4️⃣ Build Docker image
+      - name: Build Docker image
+        run: |
+          docker build -t $ECR_REPOSITORY .
+          docker tag $ECR_REPOSITORY:latest ${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY:latest
+
+      # 5️⃣ Run tests
+      - name: Run tests
+        run: |
+          docker run -e CI=true ${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY:latest npm run test
+
+      # 6️⃣ Push Docker image to ECR
+      - name: Push Docker image
+        run: |
+          docker push ${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY:latest
+
+      # 7️⃣ Download existing ECS Task Definition
+      - name: Download Task Definition
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition $TASK_DEFINITION \
+            --query "taskDefinition" > task-definition.json
+
+      # 8️⃣ Update Task Definition image
+      - name: Update Task Definition Image
+        run: |
+          jq --arg IMAGE "${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY:latest" \
+          '.containerDefinitions[0].image = $IMAGE' \
+          task-definition.json > new-task-def.json
+
+      # 9️⃣ Register new Task Definition
+      - name: Register New Task Definition
+        run: |
+          aws ecs register-task-definition \
+            --cli-input-json file://new-task-def.json
+
+      # 🔟 Update ECS Service
+      - name: Update ECS Service
+        run: |
+          aws ecs update-service \
+            --cluster $ECS_CLUSTER \
+            --service $ECS_SERVICE \
+            --force-new-deployment
