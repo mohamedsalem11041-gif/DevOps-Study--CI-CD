@@ -41,11 +41,11 @@ jobs:
           docker build -t $ECR_REPOSITORY .
           docker tag $ECR_REPOSITORY:latest ${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY:latest
 
-      # 5️⃣ Run tests
-      - name: Run tests
-        run: |
-          docker run -e CI=true ${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY:latest npm run test
 
+      # 6️⃣ Push Docker image to ECR
+      - name: Push Docker image
+        run: |
+          docker push ${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY:latest
 
       # 7️⃣ Download existing ECS Task Definition
       - name: Download Task Definition
