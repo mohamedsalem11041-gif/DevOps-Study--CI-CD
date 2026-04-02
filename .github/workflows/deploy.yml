@@ -38,13 +38,16 @@ jobs:
       # 4️⃣ Build Docker image
       - name: Build Docker image
         run: |
-          docker build -t $ECR_REPOSITORY .
-          docker tag $ECR_REPOSITORY:latest ${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY:latest
+          IMAGE_TAG=${{ github.sha }}
+
+          docker build -t $ECR_REPOSITORY:$IMAGE_TAG .
+          docker tag $ECR_REPOSITORY:$IMAGE_TAG ${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY:$IMAGE_TAG
 
       # 5️⃣ Push Docker image to ECR
       - name: Push Docker image
         run: |
-          docker push ${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY:latest
+          IMAGE_TAG=${{ github.sha }}
+          docker push ${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY:$IMAGE_TAG
 
       # 6️⃣ Download existing ECS Task Definition
       - name: Download Task Definition
@@ -57,7 +60,7 @@ jobs:
       - name: Update Task Definition Image & Clean JSON
         run: |
           # استبدال صورة الكونتينر
-          jq --arg IMAGE "${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY:latest" \
+          jq --arg IMAGE "${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY:${{ github.sha }}" \
             '.containerDefinitions[0].image = $IMAGE' task-definition.json > tmp-task-def.json
 
           # احتفظ فقط بالحقول الأساسية
@@ -71,17 +74,23 @@ jobs:
             cpu: .cpu,
             memory: .memory
           }' tmp-task-def.json > new-task-def.json
-
-      # 8️⃣ Register New Task Definition
-      - name: Register New Task Definition
+          
+      - name: Register Task Definition
+        id: register-task
         run: |
-          aws ecs register-task-definition \
-            --cli-input-json file://new-task-def.json
+          IMAGE_URI=${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY:${{ github.sha }}
 
-      # 9️⃣ Update ECS Service
-      - name: Update ECS Service
+          jq --arg IMAGE "$IMAGE_URI" \
+            '.containerDefinitions[0].image = $IMAGE' task-definition.json > new-task-def.json
+
+          aws ecs register-task-definition \
+            --cli-input-json file://new-task-def.json > output.json
+
+          echo "revision=$(cat output.json | jq -r '.taskDefinition.revision')" >> $GITHUB_OUTPUT
+
+      - name: Deploy to ECS
         run: |
           aws ecs update-service \
             --cluster $ECS_CLUSTER \
             --service $ECS_SERVICE \
-            --force-new-deployment
+            --task-definition $TASK_DEFINITION:${{ steps.register-task.outputs.revision }}
