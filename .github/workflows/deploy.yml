@@ -54,12 +54,34 @@ jobs:
             --task-definition $TASK_DEFINITION \
             --query "taskDefinition" > task-definition.json
 
-      # 8️⃣ Update Task Definition image
+        # 8️⃣ Update Task Definition image & clean JSON
       - name: Update Task Definition Image
         run: |
+          # استبدل صورة الكونتينر
           jq --arg IMAGE "${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY:latest" \
-          '.containerDefinitions[0].image = $IMAGE' \
-          task-definition.json > new-task-def.json
+            '.containerDefinitions[0].image = $IMAGE' task-definition.json > tmp-task-def.json
+
+          # نظف الحقول الغير مسموح بها
+          jq '{
+            family: .family,
+            taskRoleArn: .taskRoleArn,
+            executionRoleArn: .executionRoleArn,
+            networkMode: .networkMode,
+            containerDefinitions: .containerDefinitions,
+            volumes: .volumes,
+            placementConstraints: .placementConstraints,
+            requiresCompatibilities: .requiresCompatibilities,
+            cpu: .cpu,
+            memory: .memory,
+            tags: .tags,
+            pidMode: .pidMode,
+            ipcMode: .ipcMode,
+            proxyConfiguration: .proxyConfiguration,
+            inferenceAccelerators: .inferenceAccelerators,
+            ephemeralStorage: .ephemeralStorage,
+            runtimePlatform: .runtimePlatform,
+            enableFaultInjection: .enableFaultInjection
+          }' tmp-task-def.json > new-task-def.json
 
       # 9️⃣ Register new Task Definition
       - name: Register New Task Definition
