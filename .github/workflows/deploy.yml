@@ -1,28 +1,31 @@
 name: Deploy React to ECS
 
-on: 
+on:
   push:
-    branches: 
-      - master
+    branches:
+      - master   # أو main لو انت شغال على main
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: react-test
+  ECS_CLUSTER: react-cluster
+  ECS_SERVICE: react-service
+  TASK_DEFINITION: react-task
 
 jobs:
-  build-and-deploy: 
+  build-and-deploy:
     runs-on: ubuntu-latest
 
-    env:
-      ECR_REPOSITORY: react-test
-      ECS_CLUSTER: your-ecs-cluster
-      ECS_SERVICE: react-test-service
-      TASK_DEFINITION: react-task
-      CONTAINER_NAME: react-container
-      AWS_REGION: us-east-1
-
-    steps: 
-      # 1️⃣ Checkout repository
+    steps:
+      # -------------------------
+      # 1. Checkout repository
+      # -------------------------
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
 
-      # 2️⃣ Configure AWS credentials
+      # -------------------------
+      # 2. Configure AWS credentials
+      # -------------------------
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -30,51 +33,45 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # 3️⃣ Login to ECR
+      # -------------------------
+      # 3. Log in to ECR
+      # -------------------------
       - name: Login to Amazon ECR
-        id: login-ecr
+        id: ecr-login
         uses: aws-actions/amazon-ecr-login@v2
 
-      # 4️⃣ Build Docker image
-      - name: Build Docker image
+      # -------------------------
+      # 4. Build & test (Node stage)
+      # -------------------------
+      - name: Build and Test React App
         run: |
-          docker build -t $ECR_REPOSITORY .
-          docker tag $ECR_REPOSITORY:latest ${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY:latest
+          # Build image using Node stage only
+          docker build --target builder -t react-test-builder .
+          # Run tests
+          docker run --rm -e CI=true react-test-builder npm run test
 
-      # 5️⃣ Run tests
-      - name: Run tests
+      # -------------------------
+      # 5. Build final Nginx image
+      # -------------------------
+      - name: Build final Docker image
         run: |
-          docker run -e CI=true ${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY:latest npm run test
+          docker build -t $ECR_REPOSITORY:latest .
+          docker tag $ECR_REPOSITORY:latest ${{ steps.ecr-login.outputs.registry }}/${ECR_REPOSITORY}:latest
 
-      # 6️⃣ Push Docker image to ECR
+      # -------------------------
+      # 6. Push Docker image to ECR
+      # -------------------------
       - name: Push Docker image
         run: |
-          docker push ${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY:latest
+          docker push ${{ steps.ecr-login.outputs.registry }}/${ECR_REPOSITORY}:latest
 
-      # 7️⃣ Download existing ECS Task Definition
-      - name: Download Task Definition
-        run: |
-          aws ecs describe-task-definition \
-            --task-definition $TASK_DEFINITION \
-            --query "taskDefinition" > task-definition.json
-
-      # 8️⃣ Update Task Definition image
-      - name: Update Task Definition Image
-        run: |
-          jq --arg IMAGE "${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY:latest" \
-          '.containerDefinitions[0].image = $IMAGE' \
-          task-definition.json > new-task-def.json
-
-      # 9️⃣ Register new Task Definition
-      - name: Register New Task Definition
-        run: |
-          aws ecs register-task-definition \
-            --cli-input-json file://new-task-def.json
-
-      # 🔟 Update ECS Service
-      - name: Update ECS Service
-        run: |
-          aws ecs update-service \
-            --cluster $ECS_CLUSTER \
-            --service $ECS_SERVICE \
-            --force-new-deployment
+      # -------------------------
+      # 7. Deploy to ECS
+      # -------------------------
+      - name: Deploy to ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ${{ env.TASK_DEFINITION }}
+          service: ${{ env.ECS_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
