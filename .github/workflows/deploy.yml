@@ -79,9 +79,6 @@ jobs:
         run: |
           IMAGE_URI=${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY:${{ github.sha }}
 
-          jq --arg IMAGE "$IMAGE_URI" \
-            '.containerDefinitions[0].image = $IMAGE' task-definition.json > new-task-def.json
-
           aws ecs register-task-definition \
             --cli-input-json file://new-task-def.json > output.json
 
